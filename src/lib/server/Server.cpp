@@ -10,6 +10,7 @@
 
 #include "base/IEventQueue.h"
 #include "base/Log.h"
+#include "common/Settings.h"
 #include "deskflow/AppUtil.h"
 #include "deskflow/Computer.h"
 #include "deskflow/DeskflowException.h"
@@ -863,6 +864,58 @@ bool Server::isSwitchOkay(
   return !preventSwitch;
 }
 
+void Server::refreshPortals()
+{
+  const auto now = std::chrono::steady_clock::now();
+  if (now - m_portalsRead < std::chrono::seconds(1)) {
+    return;
+  }
+  m_portalsRead = now;
+  Settings::reload();
+  m_portals.clear();
+  for (const auto &[name, client] : m_clients) {
+    if (client == m_primaryClient) {
+      continue;
+    }
+    // In the INI file an unquoted "x,y,w,h" is read back as a string list.
+    const auto value = Settings::value(Settings::Computer::Portal.arg(QString::fromStdString(name)));
+    const auto parts = value.typeId() == QMetaType::QStringList ? value.toStringList() : value.toString().split(',');
+    if (parts.size() != 4) {
+      continue;
+    }
+    Portal p{parts[0].trimmed().toInt(), parts[1].trimmed().toInt(), parts[2].trimmed().toInt(), parts[3].trimmed().toInt()};
+    if (p.w > 1 && p.h > 1) {
+      m_portals[name] = p;
+    }
+  }
+}
+
+BaseClientProxy *Server::portalClientAt(int32_t x, int32_t y, Portal &portal) const
+{
+  for (const auto &[name, p] : m_portals) {
+    if (x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h) {
+      if (auto it = m_clients.find(name); it != m_clients.end()) {
+        portal = p;
+        return it->second;
+      }
+    }
+  }
+  return nullptr;
+}
+
+bool Server::portalOf(const BaseClientProxy *client, Portal &portal) const
+{
+  if (client == nullptr || client == m_primaryClient) {
+    return false;
+  }
+  const auto it = m_portals.find(getName(client));
+  if (it == m_portals.end()) {
+    return false;
+  }
+  portal = it->second;
+  return true;
+}
+
 void Server::noSwitch(int32_t x, int32_t y)
 {
   armSwitchTwoTap(x, y);
@@ -1630,6 +1683,25 @@ bool Server::onMouseMovePrimary(int32_t x, int32_t y)
   m_x = x;
   m_y = y;
 
+  // DeskView portal: the rectangle where a client's screen is shown behaves like that
+  // client's screen -- entering it switches to the client at the matching point.
+  if (!isLockedToComputer()) {
+    refreshPortals();
+    Portal portal;
+    if (BaseClientProxy *dst = portalClientAt(x, y, portal); dst != nullptr) {
+      int32_t dx;
+      int32_t dy;
+      int32_t dw;
+      int32_t dh;
+      dst->getShape(dx, dy, dw, dh);
+      const auto nx = dx + static_cast<int32_t>(std::lround(double(x - portal.x) * (dw - 1) / std::max(1, portal.w - 1)));
+      const auto ny = dy + static_cast<int32_t>(std::lround(double(y - portal.y) * (dh - 1) / std::max(1, portal.h - 1)));
+      LOG_DEBUG("portal: entering \"%s\" at %d,%d", getName(dst).c_str(), nx, ny);
+      switchComputer(dst, nx, ny, false);
+      return true;
+    }
+  }
+
   // get computer shape
   int32_t ax;
   int32_t ay;
@@ -1831,6 +1903,48 @@ void Server::onMouseMoveSecondary(int32_t dx, int32_t dy)
       }
 
       // skip rest of block
+      break;
+    }
+
+    // DeskView portal: leaving a client shown in a portal returns to the server just
+    // outside the portal on the same side, level with where the cursor left. If the
+    // server's desktop ends there, the cursor stays on the client like at any edge.
+    refreshPortals();
+    if (Portal portal; portalOf(m_active, portal)) {
+      int32_t sx;
+      int32_t sy;
+      int32_t sw;
+      int32_t sh;
+      m_primaryClient->getShape(sx, sy, sw, sh);
+      const auto px = portal.x + static_cast<int32_t>(std::lround(double(xc - ax) * (portal.w - 1) / std::max(1, aw - 1)));
+      const auto py = portal.y + static_cast<int32_t>(std::lround(double(yc - ay) * (portal.h - 1) / std::max(1, ah - 1)));
+      int32_t tx = px;
+      int32_t ty = py;
+      switch (dir) {
+      case Left:
+        tx = portal.x - 1;
+        break;
+      case Right:
+        tx = portal.x + portal.w;
+        break;
+      case Top:
+        ty = portal.y - 1;
+        break;
+      case Bottom:
+        ty = portal.y + portal.h;
+        break;
+      default:
+        break;
+      }
+      if (tx >= sx && tx < sx + sw && ty >= sy && ty < sy + sh && !isLockedToComputer()) {
+        LOG_DEBUG("portal: leaving \"%s\" to %d,%d", getName(m_active).c_str(), tx, ty);
+        m_x = tx;
+        m_y = ty;
+        newComputer = m_primaryClient;
+      } else {
+        newComputer = m_active;
+        jump = false;
+      }
       break;
     }
 

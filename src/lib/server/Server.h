@@ -17,6 +17,7 @@
 #include "deskflow/MouseTypes.h"
 #include "server/Config.h"
 
+#include <chrono>
 #include <climits>
 #include <map>
 #include <set>
@@ -259,6 +260,26 @@ private:
   // implement them.  returns true iff a switch is permitted.
   bool isSwitchOkay(BaseClientProxy *dst, Direction, int32_t x, int32_t y, int32_t xActive, int32_t yActive);
 
+  // DeskView portals: a client's screen shown inside a rectangle of the
+  // server's desktop (Settings::Computer::Portal, physical pixels).
+  struct Portal
+  {
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t w = 0;
+    int32_t h = 0;
+  };
+
+  // re-read the portal rectangles (at most once a second) so a portal
+  // moved by the GUI applies without restarting the server.
+  void refreshPortals();
+
+  // the connected client whose portal contains \p x, \p y, or nullptr.
+  BaseClientProxy *portalClientAt(int32_t x, int32_t y, Portal &portal) const;
+
+  // true if \p client is shown in a portal; fills \p portal.
+  bool portalOf(const BaseClientProxy *client, Portal &portal) const;
+
   // update switch state due to a mouse move at \p x, \p y that
   // doesn't switch computers.
   void noSwitch(int32_t x, int32_t y);
@@ -411,6 +432,10 @@ private:
   using ClientSet = std::set<BaseClientProxy *>;
   ClientList m_clients;
   ClientSet m_clientSet;
+
+  // DeskView portals by client name, and when they were last read
+  std::map<std::string, Portal> m_portals;
+  std::chrono::steady_clock::time_point m_portalsRead;
 
   // all old connections that we're waiting to hangup
   using OldClients = std::map<BaseClientProxy *, EventQueueTimer *>;
