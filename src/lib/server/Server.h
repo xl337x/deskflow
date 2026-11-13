@@ -16,6 +16,9 @@
 #include "deskflow/KeyTypes.h"
 #include "deskflow/MouseTypes.h"
 #include "server/Config.h"
+#include "server/Portal.h"
+
+#include <QDateTime>
 
 #include <chrono>
 #include <climits>
@@ -262,13 +265,7 @@ private:
 
   // DeskView portals: a client's screen shown inside a rectangle of the
   // server's desktop (Settings::Computer::Portal, physical pixels).
-  struct Portal
-  {
-    int32_t x = 0;
-    int32_t y = 0;
-    int32_t w = 0;
-    int32_t h = 0;
-  };
+  using Portal = deskflow::server::Portal;
 
   // re-read the portal rectangles (at most once a second) so a portal
   // moved by the GUI applies without restarting the server.
@@ -436,6 +433,8 @@ private:
   // DeskView portals by client name, and when they were last read
   std::map<std::string, Portal> m_portals;
   std::chrono::steady_clock::time_point m_portalsRead;
+  QDateTime m_portalsFileTime;  // settings file time when portals were last read
+  size_t m_portalsClients = 0;   // client count then (a new client may have a portal)
 
   // all old connections that we're waiting to hangup
   using OldClients = std::map<BaseClientProxy *, EventQueueTimer *>;

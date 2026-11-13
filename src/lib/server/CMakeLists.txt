@@ -34,6 +34,8 @@ add_library(server STATIC
   Config.h
   InputFilter.cpp
   InputFilter.h
+  Portal.cpp
+  Portal.h
   PrimaryClient.cpp
   PrimaryClient.h
   Server.cpp

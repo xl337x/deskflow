@@ -146,6 +146,8 @@ public:
     //! DeskView portal: "x,y,w,h" rectangle of the server's desktop (physical pixels) where this computer's
     //! screen is shown. Moving the mouse into it switches to this computer at the matching point. Empty = none.
     inline static const auto Portal = QStringLiteral("computer_%1/portal");
+    //! process id of the program that set the portal; the portal is ignored once it exits
+    inline static const auto PortalPid = QStringLiteral("computer_%1/portalPid");
   };
 
   // Track Removed keys to make upgrading config easier
@@ -218,8 +220,6 @@ public:
   static void removeUnknownComputers(const QStringList &knownComputers);
   static QVariant computerDefaults(const QString &key);
   static QStringList knownComputers();
-  //! Re-read the settings file if another process changed it (e.g. the GUI moved a portal).
-  static void reload();
 
 Q_SIGNALS:
   void settingsChanged(const QString key);

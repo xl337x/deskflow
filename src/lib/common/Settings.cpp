@@ -535,11 +535,6 @@ QVariant Settings::computerDefaults(const QString &key)
   return QVariant();
 }
 
-void Settings::reload()
-{
-  instance()->m_settings->sync();
-}
-
 QStringList Settings::knownComputers()
 {
   const QStringList knownGroups = instance()->m_settings->childGroups();
