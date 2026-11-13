@@ -881,7 +881,10 @@ void Server::refreshPortals()
   const auto modified = file.lastModified();
   if (modified == m_portalsFileTime && m_portalsClients == m_clients.size()) {
     // nothing changed on disk; only drop portals whose owner (DeskView) has died
-    std::erase_if(m_portals, [](const auto &entry) { return entry.second.ownerGone(); });
+    for (auto &[name, portals] : m_portals) {
+      std::erase_if(portals, [](const Portal &p) { return p.ownerGone(); });
+    }
+    std::erase_if(m_portals, [](const auto &entry) { return entry.second.empty(); });
     return;
   }
   m_portalsFileTime = modified;
@@ -894,38 +897,57 @@ void Server::refreshPortals()
       continue;
     }
     const auto computer = QString::fromStdString(name);
-    if (auto p = Portal::fromSetting(settings.value(Settings::Computer::Portal.arg(computer))); p.has_value()) {
-      p->ownerPid = settings.value(Settings::Computer::PortalPid.arg(computer)).toLongLong();
-      if (!p->ownerGone()) {
-        m_portals[name] = *p;
-      }
+    auto portals = Portal::listFromSetting(settings.value(Settings::Computer::Portal.arg(computer)));
+    const auto owner = settings.value(Settings::Computer::PortalPid.arg(computer)).toLongLong();
+    for (auto &p : portals) {
+      p.ownerPid = owner;
+    }
+    std::erase_if(portals, [](const Portal &p) { return p.ownerGone(); });
+    if (!portals.empty()) {
+      m_portals[name] = std::move(portals);
     }
   }
 }
 
 BaseClientProxy *Server::portalClientAt(int32_t x, int32_t y, Portal &portal) const
 {
-  for (const auto &[name, p] : m_portals) {
-    if (p.contains(x, y)) {
-      if (auto it = m_clients.find(name); it != m_clients.end()) {
-        portal = p;
-        return it->second;
+  for (const auto &[name, portals] : m_portals) {
+    for (const auto &p : portals) {
+      if (p.contains(x, y)) {
+        if (auto it = m_clients.find(name); it != m_clients.end()) {
+          portal = p;
+          return it->second;
+        }
       }
     }
   }
   return nullptr;
 }
 
-bool Server::portalOf(const BaseClientProxy *client, Portal &portal) const
+bool Server::portalOf(const BaseClientProxy *client, int32_t x, int32_t y, Portal &portal) const
 {
   if (client == nullptr || client == m_primaryClient) {
     return false;
   }
   const auto it = m_portals.find(getName(client));
-  if (it == m_portals.end()) {
+  if (it == m_portals.end() || it->second.empty()) {
     return false;
   }
-  portal = it->second;
+  // the portal showing the client monitor the point is on (or nearest to it)
+  int64_t best = INT64_MAX;
+  for (const auto &p : it->second) {
+    if (!p.source.has_value()) {
+      portal = p;
+      return true;
+    }
+    const auto &s = *p.source;
+    const int64_t dx = x < s.x ? s.x - x : (x >= s.x + s.w ? x - (s.x + s.w - 1) : 0);
+    const int64_t dy = y < s.y ? s.y - y : (y >= s.y + s.h ? y - (s.y + s.h - 1) : 0);
+    if (dx * dx + dy * dy < best) {
+      best = dx * dx + dy * dy;
+      portal = p;
+    }
+  }
   return true;
 }
 
@@ -1919,7 +1941,7 @@ void Server::onMouseMoveSecondary(int32_t dx, int32_t dy)
     // outside the portal on the same side, level with where the cursor left. If the
     // server's desktop ends there, the cursor stays on the client like at any edge.
     refreshPortals();
-    if (Portal portal; portalOf(m_active, portal)) {
+    if (Portal portal; portalOf(m_active, xc, yc, portal)) {
       deskflow::server::PortalRect primary;
       m_primaryClient->getShape(primary.x, primary.y, primary.w, primary.h);
       const auto exit = portal.exitPoint(dir, xc, yc, {ax, ay, aw, ah}, primary);

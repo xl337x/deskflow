@@ -274,8 +274,9 @@ private:
   // the connected client whose portal contains \p x, \p y, or nullptr.
   BaseClientProxy *portalClientAt(int32_t x, int32_t y, Portal &portal) const;
 
-  // true if \p client is shown in a portal; fills \p portal.
-  bool portalOf(const BaseClientProxy *client, Portal &portal) const;
+  // true if \p client is shown in a portal; fills \p portal with the one
+  // showing the client point \p x, \p y (or the nearest).
+  bool portalOf(const BaseClientProxy *client, int32_t x, int32_t y, Portal &portal) const;
 
   // update switch state due to a mouse move at \p x, \p y that
   // doesn't switch computers.
@@ -431,7 +432,7 @@ private:
   ClientSet m_clientSet;
 
   // DeskView portals by client name, and when they were last read
-  std::map<std::string, Portal> m_portals;
+  std::map<std::string, std::vector<Portal>> m_portals;
   std::chrono::steady_clock::time_point m_portalsRead;
   QDateTime m_portalsFileTime;  // settings file time when portals were last read
   size_t m_portalsClients = 0;   // client count then (a new client may have a portal)

@@ -505,3 +505,78 @@ void PortalTests::exitPoint_portalOutsidePrimary()
 }
 
 QTEST_MAIN(PortalTests)
+
+//
+// several portals per client, each showing one client monitor (source rectangle)
+//
+
+void PortalTests::listFromSetting_multiple()
+{
+  // two client monitors side by side (1920x1080 each), shown on two server monitors
+  const auto list = Portal::listFromSetting(
+      QStringLiteral("3840,0,1920,1080,L@0,0,1920,1080; 1920,0,1920,1080,LR@1920,0,1920,1080")
+  );
+  QCOMPARE(int(list.size()), 2);
+  QCOMPARE(static_cast<const PortalRect &>(list[0]), (PortalRect{3840, 0, 1920, 1080}));
+  QCOMPARE(list[0].exits, uint8_t(Portal::ExitLeft));
+  QVERIFY(list[0].source.has_value());
+  QCOMPARE(*list[0].source, (PortalRect{0, 0, 1920, 1080}));
+  QCOMPARE(*list[1].source, (PortalRect{1920, 0, 1920, 1080}));
+  QCOMPARE(list[1].exits, uint8_t(Portal::ExitLeft | Portal::ExitRight));
+}
+
+void PortalTests::listFromSetting_skipsInvalid()
+{
+  const auto list = Portal::listFromSetting(QStringLiteral("0,0,10,10;garbage;5,5,1,1;20,20,10,10@0,0,0,5;30,30,10,10"));
+  QCOMPARE(int(list.size()), 2); // "garbage", the 1x1 portal and the empty source are dropped
+  QCOMPARE(list[0].x, 0);
+  QCOMPARE(list[1].x, 30);
+}
+
+void PortalTests::listFromSetting_stringList()
+{
+  // unquoted in the INI file, the commas split the value into a string list
+  const auto list = Portal::listFromSetting(QStringList{"0", "0", "10", "10@0", "0", "5", "5;20", "20", "10", "10"});
+  QCOMPARE(int(list.size()), 2);
+  QCOMPARE(*list[0].source, (PortalRect{0, 0, 5, 5}));
+  QCOMPARE(list[1].x, 20);
+  QVERIFY(Portal::listFromSetting(QVariant()).empty());
+}
+
+void PortalTests::fromSetting_source()
+{
+  QVERIFY(Portal::fromSetting(QStringLiteral("0,0,10,10@-1920,0,1920,1080"))->source.has_value());
+  QVERIFY(!Portal::fromSetting(QStringLiteral("0,0,10,10@1,2,3")).has_value());   // three numbers
+  QVERIFY(!Portal::fromSetting(QStringLiteral("0,0,10,10@a,0,5,5")).has_value());  // not a number
+  QVERIFY(!Portal::fromSetting(QStringLiteral("0,0,10,10@0,0,-5,5")).has_value()); // negative size
+  QVERIFY(!Portal::fromSetting(QStringLiteral("0,0,10,10,LR@")).has_value());      // empty source
+}
+
+void PortalTests::toClient_source()
+{
+  // the portal shows the client's SECOND monitor: its points land there, not on the whole desktop
+  auto p = portal(1920, 0, 1920, 1080);
+  p.source = PortalRect{1920, 0, 1920, 1080};
+  const PortalRect desktop{0, 0, 3840, 1080};
+  QCOMPARE(p.toClient(1920, 0, desktop), (PortalPoint{1920, 0}));
+  QCOMPARE(p.toClient(3839, 1079, desktop), (PortalPoint{3839, 1079}));
+  QCOMPARE(p.toClient(2880, 540, desktop), (PortalPoint{2880, 540}));
+  // a smaller portal (letterboxed) still covers the whole monitor
+  auto q = portal(0, 135, 1440, 810);
+  q.source = PortalRect{1920, 0, 1920, 1080};
+  QCOMPARE(q.toClient(0, 135, desktop), (PortalPoint{1920, 0}));
+  QCOMPARE(q.toClient(1439, 944, desktop), (PortalPoint{3839, 1079}));
+}
+
+void PortalTests::exitPoint_source()
+{
+  // leaving the client's right edge (on its second monitor) lands right of the portal showing that
+  // monitor, level with the height on that monitor
+  auto p = portal(1920, 0, 1920, 1080);
+  p.source = PortalRect{1920, 0, 1920, 1080};
+  const PortalRect desktop{0, 0, 3840, 1080};
+  const PortalRect primary{0, 0, 5760, 1080};
+  QCOMPARE(p.exitPoint(Right, 3839, 540, desktop, primary), exitAt(3840, 540));
+  // a point outside the source (clamped first) still exits level with the source's edge
+  QCOMPARE(p.exitPoint(Right, 3839, 2000, desktop, primary), exitAt(3840, 1079));
+}

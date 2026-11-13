@@ -17,6 +17,12 @@ private Q_SLOTS:
   void fromSetting_exits();
   void exitPoint_sideNotAllowed();
   void ownerGone();
+  void listFromSetting_multiple();
+  void listFromSetting_skipsInvalid();
+  void listFromSetting_stringList();
+  void fromSetting_source();
+  void toClient_source();
+  void exitPoint_source();
 
   // hit testing
   void contains_edges();

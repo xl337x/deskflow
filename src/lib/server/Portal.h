@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 class QVariant;
 
@@ -60,6 +61,9 @@ struct Portal : PortalRect
   //! process that owns the portal (Settings::Computer::PortalPid); 0 = not tracked
   int64_t ownerPid = 0;
 
+  //! the part of the client's desktop shown in this portal (one of its monitors); none = the whole desktop
+  std::optional<PortalRect> source;
+
   bool operator==(const Portal &) const = default;
 
   //! true if an owner was recorded and it is no longer running (its portal is stale)
@@ -79,6 +83,19 @@ struct Portal : PortalRect
    * fits in 32 bits and SIDES (if given) only holds L/R/T/B.
    */
   static std::optional<Portal> fromSetting(const QVariant &value);
+
+  /**
+   * @brief Parse a value holding several portals for one client, separated by ';'
+   * Each entry is "x,y,w,h[,SIDES][@sx,sy,sw,sh]": the optional part after '@' is the rectangle of
+   * the client's desktop (one of its monitors) that this portal shows. Invalid entries are skipped.
+   */
+  static std::vector<Portal> listFromSetting(const QVariant &value);
+
+  //! the client rectangle this portal maps to: its source, or the client's whole \p shape
+  const PortalRect &target(const PortalRect &shape) const
+  {
+    return source.has_value() ? *source : shape;
+  }
 
   //! true if a process with this id is running (portals are dropped when their owner dies)
   static bool processRunning(int64_t pid);

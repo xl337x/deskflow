@@ -40,9 +40,44 @@ bool PortalRect::contains(int32_t px, int32_t py) const
   return px >= x && px < x + w && py >= y && py < y + h;
 }
 
+std::vector<Portal> Portal::listFromSetting(const QVariant &value)
+{
+  // an unquoted INI value with commas is read back as a string list: put the commas back
+  const auto text = value.typeId() == QMetaType::QStringList ? value.toStringList().join(',') : value.toString();
+  std::vector<Portal> portals;
+  for (const auto &entry : text.split(';', Qt::SkipEmptyParts)) {
+    if (auto p = fromSetting(entry.trimmed()); p.has_value()) {
+      portals.push_back(*p);
+    }
+  }
+  return portals;
+}
+
 std::optional<Portal> Portal::fromSetting(const QVariant &value)
 {
-  const auto parts = value.typeId() == QMetaType::QStringList ? value.toStringList() : value.toString().split(',');
+  auto text = value.typeId() == QMetaType::QStringList ? value.toStringList().join(',') : value.toString();
+  std::optional<PortalRect> source;
+  if (const auto at = text.indexOf('@'); at >= 0) {
+    const auto s = text.mid(at + 1).split(',');
+    text.truncate(at);
+    if (s.size() != 4) {
+      return std::nullopt;
+    }
+    PortalRect r;
+    int32_t *fields[] = {&r.x, &r.y, &r.w, &r.h};
+    for (int i = 0; i < 4; ++i) {
+      bool ok = false;
+      *fields[i] = s[i].trimmed().toInt(&ok);
+      if (!ok) {
+        return std::nullopt;
+      }
+    }
+    if (r.w < 1 || r.h < 1) {
+      return std::nullopt;
+    }
+    source = r;
+  }
+  const auto parts = text.split(',');
   if (parts.size() != 4 && parts.size() != 5) {
     return std::nullopt;
   }
@@ -78,6 +113,7 @@ std::optional<Portal> Portal::fromSetting(const QVariant &value)
       }
     }
   }
+  p.source = source;
   return p;
 }
 
@@ -102,7 +138,8 @@ bool Portal::processRunning(int64_t pid)
 
 PortalPoint Portal::toClient(int32_t px, int32_t py, const PortalRect &shape) const
 {
-  return {shape.x + scale(px - x, w, shape.w), shape.y + scale(py - y, h, shape.h)};
+  const auto &t = target(shape);
+  return {t.x + scale(px - x, w, t.w), t.y + scale(py - y, h, t.h)};
 }
 
 PortalPoint Portal::fromClient(int32_t cx, int32_t cy, const PortalRect &shape) const
@@ -113,7 +150,9 @@ PortalPoint Portal::fromClient(int32_t cx, int32_t cy, const PortalRect &shape) 
 std::optional<PortalPoint>
 Portal::exitPoint(Direction dir, int32_t cx, int32_t cy, const PortalRect &shape, const PortalRect &primary) const
 {
-  auto target = fromClient(cx, cy, shape);
+  // level with where the cursor left, measured on the monitor this portal shows
+  const auto &t = this->target(shape);
+  auto target = fromClient(std::clamp(cx, t.x, t.x + t.w - 1), std::clamp(cy, t.y, t.y + t.h - 1), t);
   using enum Direction;
   switch (dir) {
   case Left:
